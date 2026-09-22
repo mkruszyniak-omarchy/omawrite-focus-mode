@@ -38,6 +38,7 @@ ApplicationWindow {
     property string pendingAction: ""
     property bool replaceOpen: false
     property bool awaitingPendingSave: false
+    property bool focusMode: false
 
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: backend.themeAccent
@@ -89,6 +90,13 @@ ApplicationWindow {
         win.visibility = win.visibility === Window.FullScreen
             ? Window.Windowed
             : Window.FullScreen;
+    }
+
+    function toggleFocusMode() {
+        focusMode = !focusMode;
+        backend.setFocusMode(focusMode, editor.cursorPosition);
+        toggleFullScreen();
+        Qt.callLater(editorFlick.ensureCursorVisible);
     }
 
     function updateSearch() {
@@ -203,7 +211,13 @@ ApplicationWindow {
     }
 
     Shortcut {
-        sequences: ["Meta+F", "F11"]
+        sequence: "Meta+F"
+        context: Qt.ApplicationShortcut
+        onActivated: toggleFocusMode()
+    }
+
+    Shortcut {
+        sequence: "F11"
         context: Qt.ApplicationShortcut
         onActivated: toggleFullScreen()
     }
@@ -331,7 +345,7 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nSuper+F  Focus mode + fullscreen\nF11  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -346,7 +360,8 @@ ApplicationWindow {
             anchors.rightMargin: 24
             clip: true
             contentWidth: width
-            contentHeight: Math.max(height, editor.y + editor.implicitHeight + 220)
+            contentHeight: Math.max(height, editor.y + editor.implicitHeight
+                                    + (win.focusMode ? height / 2 : 220))
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {
                 policy: ScrollBar.AsNeeded
@@ -523,6 +538,20 @@ ApplicationWindow {
                 var cursorBottom = cursorTop + editor.cursorRectangle.height;
                 var maxContentY = Math.max(0, contentHeight - height);
 
+                if (win.focusMode) {
+                    var paragraph = backend.focusParagraphRange(editor.cursorPosition);
+                    if (paragraph.start < 0)
+                        return;
+                    var firstLine = editor.positionToRectangle(paragraph.start);
+                    var lastLine = editor.positionToRectangle(
+                        Math.max(paragraph.start, paragraph.end - 2));
+                    var paragraphMiddle = editor.y + (firstLine.y + lastLine.y
+                                                      + lastLine.height) / 2;
+                    scrollTo(Math.max(0, Math.min(maxContentY,
+                        paragraphMiddle - height / 2)));
+                    return;
+                }
+
                 if (cursorBottom + margin > contentY + height)
                     scrollTo(Math.min(maxContentY, cursorBottom + margin - height));
                 else if (cursorTop - margin < contentY)
@@ -533,7 +562,8 @@ ApplicationWindow {
                 id: editor
                 objectName: "sourceEditor"
                 x: Math.round((editorFlick.width - width) / 2)
-                y: Math.max(42, Math.round(win.height * 0.05))
+                y: win.focusMode ? Math.round(editorFlick.height / 2)
+                                 : Math.max(42, Math.round(win.height * 0.05))
                 width: win.editorWidth
                 height: Math.max(editorFlick.height - y - 96, implicitHeight + 20)
                 text: ""
@@ -559,6 +589,7 @@ ApplicationWindow {
                     color: win.strongTextColor
                 }
                 onCursorRectangleChanged: editorFlick.ensureCursorVisible()
+                onCursorPositionChanged: backend.setFocusMode(win.focusMode, cursorPosition)
 
                 function replaceSelectionWith(replacement) {
                     var start = Math.min(selectionStart, selectionEnd);
@@ -791,6 +822,7 @@ ApplicationWindow {
 
                 Component.onCompleted: {
                     backend.attachDocument(textDocument);
+                    backend.setFocusMode(win.focusMode, cursorPosition);
                     forceActiveFocus();
                 }
             }

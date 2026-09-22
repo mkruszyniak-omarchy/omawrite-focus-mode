@@ -4,6 +4,7 @@
 #include <QFont>
 #include <QFontMetricsF>
 #include <QTextDocument>
+#include <QTextBlock>
 
 MarkdownHighlighter::MarkdownHighlighter(QTextDocument *document)
     : QSyntaxHighlighter(document) {
@@ -38,6 +39,56 @@ void MarkdownHighlighter::setSearch(const QString &query, int currentMatchStart)
     m_searchQuery = query;
     m_currentMatchStart = currentMatchStart;
     rehighlight();
+}
+
+void MarkdownHighlighter::setFocusMode(bool enabled, int cursorPosition) {
+    const int oldFirstBlock = m_activeFirstBlock;
+    const int oldLastBlock = m_activeLastBlock;
+    const bool oldEnabled = m_focusMode;
+    m_focusMode = enabled;
+    updateActiveParagraph(cursorPosition);
+    if (oldEnabled != enabled || oldFirstBlock != m_activeFirstBlock
+            || oldLastBlock != m_activeLastBlock)
+        rehighlight();
+}
+
+QPair<int, int> MarkdownHighlighter::paragraphRange(const QTextDocument *document,
+                                                    int cursorPosition) {
+    if (!document)
+        return {-1, -1};
+    QTextBlock block = document->findBlock(qBound(0, cursorPosition,
+                                                   qMax(0, document->characterCount() - 1)));
+    if (!block.isValid())
+        return {-1, -1};
+    if (block.text().trimmed().isEmpty() && block.previous().isValid()
+            && !block.previous().text().trimmed().isEmpty())
+        block = block.previous();
+    if (block.text().trimmed().isEmpty())
+        return {block.position(), block.position() + block.length()};
+    QTextBlock first = block;
+    QTextBlock last = block;
+    while (first.previous().isValid() && !first.previous().text().trimmed().isEmpty())
+        first = first.previous();
+    while (last.next().isValid() && !last.next().text().trimmed().isEmpty())
+        last = last.next();
+    return {first.position(), last.position() + last.length()};
+}
+
+void MarkdownHighlighter::updateActiveParagraph(int cursorPosition) {
+    m_activeStart = -1;
+    m_activeEnd = -1;
+    m_activeFirstBlock = -1;
+    m_activeLastBlock = -1;
+    if (!m_focusMode || !document())
+        return;
+    const auto range = paragraphRange(document(), cursorPosition);
+    m_activeStart = range.first;
+    m_activeEnd = range.second;
+    if (m_activeStart < 0)
+        return;
+    m_activeFirstBlock = document()->findBlock(m_activeStart).blockNumber();
+    m_activeLastBlock = document()->findBlock(qMax(m_activeStart, m_activeEnd - 1))
+                            .blockNumber();
 }
 
 void MarkdownHighlighter::rebuildFormats() {
@@ -101,6 +152,9 @@ void MarkdownHighlighter::rebuildFormats() {
     m_currentSearchFormat = QTextCharFormat();
     m_currentSearchFormat.setBackground(m_darkMode ? QColor(QStringLiteral("#b36b20"))
                                                    : QColor(QStringLiteral("#ffad42")));
+    m_dimmedForeground = QColor::fromRgbF(background.redF() * 0.75 + text.redF() * 0.25,
+                                           background.greenF() * 0.75 + text.greenF() * 0.25,
+                                           background.blueF() * 0.75 + text.blueF() * 0.25);
 }
 
 void MarkdownHighlighter::highlightBlock(const QString &text) {
@@ -112,6 +166,25 @@ void MarkdownHighlighter::highlightBlock(const QString &text) {
         }
     }
     highlightSearch(text);
+    highlightFocus(text);
+}
+
+void MarkdownHighlighter::highlightFocus(const QString &text) {
+    if (!m_focusMode || text.isEmpty()
+            || (currentBlock().position() >= m_activeStart
+                && currentBlock().position() < m_activeEnd))
+        return;
+
+    const QColor background = !m_customBackground.isEmpty() ? QColor(m_customBackground)
+        : (m_darkMode ? QColor(QStringLiteral("#101010")) : QColor(QStringLiteral("#ffffff")));
+    for (int i = 0; i < text.length(); ++i) {
+        QTextCharFormat character = format(i);
+        // Hidden Markdown markers must stay hidden in both modes.
+        if (character.foreground().color() == background)
+            continue;
+        character.setForeground(m_dimmedForeground);
+        setFormat(i, 1, character);
+    }
 }
 
 void MarkdownHighlighter::highlightSearch(const QString &text) {

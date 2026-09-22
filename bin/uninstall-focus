@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+desktop="${XDG_DATA_HOME:-$HOME/.local/share}/applications/omawrite.desktop"
+bindings="$HOME/.config/hypr/bindings.lua"
+
+python3 - "$desktop" "$bindings" <<'PY'
+from pathlib import Path
+import shutil
+import sys
+
+desktop, bindings = map(Path, sys.argv[1:])
+start = '-- Omawrite Focus Mode BEGIN'
+end = '-- Omawrite Focus Mode END'
+if bindings.exists():
+    original = bindings.read_text()
+    if start in original and end in original:
+        prefix, rest = original.split(start, 1)
+        _, suffix = rest.split(end, 1)
+        bindings.write_text(prefix.rstrip() + suffix)
+if desktop.exists() and desktop.read_text().startswith('# Omawrite Focus Mode'):
+    backup = desktop.with_name(desktop.name + '.pre-focus')
+    if backup.exists():
+        shutil.move(backup, desktop)
+    else:
+        desktop.unlink()
+PY
+
+rm -f -- "$HOME/.local/opt/omawrite-focus/omawrite"
+if command -v hyprctl >/dev/null 2>&1 && [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]]; then
+    hyprctl reload
+    hyprctl configerrors
+fi
+printf 'Omawrite Focus Mode launcher removed. The system package was not changed.\n'

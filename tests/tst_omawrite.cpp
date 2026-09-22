@@ -4,6 +4,9 @@
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickStyle>
+#include <QTextDocument>
+#include <QTextBlock>
+#include <QTextLayout>
 
 #include "backend.h"
 #include "markdownhighlighter.h"
@@ -52,6 +55,42 @@ private slots:
         QCOMPARE(markup.at(0).content.length, 4);
         QCOMPARE(markup.at(2).content.length, 4);
         QCOMPARE(markup.at(2).markers[0].length, 1);
+    }
+
+    void focusModeDimsOnlyOtherParagraphs() {
+        QTextDocument document;
+        const QString text = QStringLiteral("First line\ncontinued\n \nThird paragraph\n");
+        document.setPlainText(text);
+        MarkdownHighlighter highlighter(&document);
+        highlighter.setColors(QStringLiteral("#101010"), QStringLiteral("#f0f0f0"),
+                              QStringLiteral("#5584aa"));
+
+        const int thirdStart = text.indexOf(QStringLiteral("Third"));
+        const auto range = MarkdownHighlighter::paragraphRange(&document, text.length());
+        QCOMPARE(range.first, thirdStart); // Trailing newline belongs to the last paragraph.
+        const auto previousRange = MarkdownHighlighter::paragraphRange(&document, 2);
+        QCOMPARE(previousRange.first, 0);
+        QCOMPARE(previousRange.second, text.indexOf(QStringLiteral(" \n")));
+
+        const auto firstColor = [&document](int blockNumber) {
+            const QTextBlock block = document.findBlockByNumber(blockNumber);
+            for (const auto &format : block.layout()->formats()) {
+                if (format.start == 0)
+                    return format.format.foreground().color();
+            }
+            return QColor();
+        };
+
+        highlighter.setFocusMode(true, text.length());
+        QCOMPARE(firstColor(0), QColor(QStringLiteral("#484848")));
+        QVERIFY(firstColor(3) != QColor(QStringLiteral("#484848")));
+
+        highlighter.setFocusMode(true, 2);
+        QVERIFY(firstColor(0) != QColor(QStringLiteral("#484848")));
+        QCOMPARE(firstColor(3), QColor(QStringLiteral("#484848")));
+
+        highlighter.setFocusMode(false, 2);
+        QVERIFY(firstColor(3) != QColor(QStringLiteral("#484848")));
     }
 
     void loadsCurrentOmarchyTheme() {

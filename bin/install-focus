@@ -1,0 +1,89 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+"$root/bin/build"
+
+install_dir="$HOME/.local/opt/omawrite-focus"
+desktop_dir="${XDG_DATA_HOME:-$HOME/.local/share}/applications"
+mkdir -p "$install_dir" "$desktop_dir"
+
+# Replace the executable atomically so reinstalling while Omawrite runs works.
+temporary_binary=$(mktemp "$install_dir/.omawrite.XXXXXX")
+trap 'rm -f -- "$temporary_binary"' EXIT
+install -m 755 "$root/build/omawrite" "$temporary_binary"
+mv -f -- "$temporary_binary" "$install_dir/omawrite"
+
+python3 - "$root/pkgbuild/omawrite.desktop" "$desktop_dir/omawrite.desktop" \
+    "$install_dir/omawrite" "$HOME/.config/hypr/bindings.lua" <<'PY'
+from pathlib import Path
+import re
+import shutil
+import sys
+from datetime import datetime
+
+source, desktop, binary, bindings = map(Path, sys.argv[1:])
+start = '-- Omawrite Focus Mode BEGIN'
+end = '-- Omawrite Focus Mode END'
+
+contents = source.read_text()
+contents, replacements = re.subn(r'^Exec=.*$', f'Exec={binary} %f', contents,
+                                  count=1, flags=re.MULTILINE)
+if replacements != 1:
+    raise SystemExit('Desktop entry has no Exec line; installation stopped.')
+existing_desktop = desktop.read_text() if desktop.exists() else ''
+if existing_desktop and not existing_desktop.startswith('# Omawrite Focus Mode') \
+        and str(binary) not in existing_desktop:
+    backup = desktop.with_name(desktop.name + '.pre-focus')
+    if not backup.exists():
+        shutil.copy2(desktop, backup)
+desktop.write_text('# Omawrite Focus Mode local override\n' + contents)
+
+if not bindings.exists():
+    print('No Hyprland bindings.lua found; binary and desktop entry installed.')
+    raise SystemExit(0)
+
+block = f'''{start}
+-- Super+F reaches Omawrite; other windows keep Hyprland fullscreen.
+hl.unbind("SUPER + F")
+o.bind("SUPER + F", "Fullscreen / Omawrite focus mode", function()
+  local window = hl.get_active_window()
+  if window and window.class == "omawrite" then
+    hl.dispatch(hl.dsp.send_key_state({{ mods = "SUPER", key = "F", state = "down" }}))
+    hl.timer(function()
+      hl.dispatch(hl.dsp.send_key_state({{ mods = "SUPER", key = "F", state = "up" }}))
+    end, {{ timeout = 50, type = "oneshot" }})
+  elseif window then
+    hl.dispatch(hl.dsp.window.fullscreen({{ mode = "fullscreen" }}))
+  end
+end)
+
+hl.unbind("SUPER + SHIFT + W")
+o.bind("SUPER + SHIFT + W", "Omawrite", {{ launch = (os.getenv("HOME") or "") .. "/.local/opt/omawrite-focus/omawrite" }})
+{end}'''
+
+original = bindings.read_text()
+if (start in original) != (end in original):
+    raise SystemExit('Incomplete Omawrite Focus Mode block in bindings.lua; inspect it before reinstalling.')
+backup = bindings.with_name(bindings.name + '.bak.focus-' + datetime.now().strftime('%Y%m%d-%H%M%S-%f'))
+shutil.copy2(bindings, backup)
+if start in original:
+    prefix, rest = original.split(start, 1)
+    _, suffix = rest.split(end, 1)
+    updated = prefix.rstrip() + '\n\n' + block + suffix
+else:
+    updated = original.rstrip() + '\n\n' + block + '\n'
+bindings.write_text(updated)
+print(f'Installed {binary}')
+print(f'Desktop entry: {desktop}')
+print(f'Hyprland backup: {backup}')
+PY
+
+if command -v hyprctl >/dev/null 2>&1 && [[ -n ${HYPRLAND_INSTANCE_SIGNATURE:-} ]]; then
+    hyprctl reload
+    errors=$(hyprctl configerrors)
+    if [[ -n $errors ]]; then
+        printf 'Hyprland config errors:\n%s\n' "$errors" >&2
+        exit 1
+    fi
+fi

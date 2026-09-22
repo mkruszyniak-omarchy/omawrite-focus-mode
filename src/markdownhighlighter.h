@@ -3,6 +3,7 @@
 #include <QRegularExpression>
 #include <QSyntaxHighlighter>
 #include <QTextCharFormat>
+#include <QPair>
 
 class MarkdownHighlighter : public QSyntaxHighlighter {
     Q_OBJECT
@@ -13,6 +14,8 @@ public:
     void setDarkMode(bool darkMode);
     void setColors(const QString &background, const QString &foreground, const QString &accent);
     void setSearch(const QString &query, int currentMatchStart);
+    void setFocusMode(bool enabled, int cursorPosition);
+    static QPair<int, int> paragraphRange(const QTextDocument *document, int cursorPosition);
 
     struct Span {
         int start;
@@ -40,6 +43,8 @@ private:
     void highlightMarkers(const QString &text);
     void highlightInline(const QString &text);
     void highlightSearch(const QString &text);
+    void highlightFocus(const QString &text);
+    void updateActiveParagraph(int cursorPosition);
 
     bool m_darkMode = true;
     QString m_customBackground;
@@ -57,4 +62,10 @@ private:
     int m_currentMatchStart = -1;
     QTextCharFormat m_searchFormat;
     QTextCharFormat m_currentSearchFormat;
+    bool m_focusMode = false;
+    int m_activeStart = -1;
+    int m_activeEnd = -1;
+    int m_activeFirstBlock = -1;
+    int m_activeLastBlock = -1;
+    QColor m_dimmedForeground;
 };

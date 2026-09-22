@@ -395,6 +395,16 @@ void Backend::setSearchHighlight(const QString &query, int currentMatchStart) {
         m_highlighter->setSearch(query, currentMatchStart);
 }
 
+void Backend::setFocusMode(bool enabled, int cursorPosition) {
+    if (m_highlighter)
+        m_highlighter->setFocusMode(enabled, cursorPosition);
+}
+
+QVariantMap Backend::focusParagraphRange(int cursorPosition) const {
+    const auto range = MarkdownHighlighter::paragraphRange(m_document, cursorPosition);
+    return {{QStringLiteral("start"), range.first}, {QStringLiteral("end"), range.second}};
+}
+
 void Backend::openExternalUrl(const QUrl &url) {
     const QString scheme = url.scheme().toLower();
     if (scheme == QStringLiteral("http") || scheme == QStringLiteral("https")
